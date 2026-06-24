@@ -1,0 +1,728 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Customer Ledger</title>
+<!-- PDF generation (landscape) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+<style>
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { font-family:system-ui,sans-serif; background:#ffffff; color:#24292f; min-height:100vh; padding:20px; }
+
+  .ctrl-bar {
+    display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+    padding:12px 16px; margin-bottom:18px;
+    background:#f6f8fa; border:1px solid #d0d7de; border-radius:10px;
+  }
+  .load-btn {
+    padding:8px 20px; border:none; border-radius:7px; cursor:pointer;
+    font-size:13px; font-weight:700; background:#0969da; color:#fff; transition:opacity .15s;
+  }
+  .load-btn:disabled { opacity:.45; cursor:not-allowed; }
+  .prog-wrap { flex:1; min-width:100px; height:5px; background:#d0d7de; border-radius:3px; overflow:hidden; }
+  .prog-bar  { height:100%; width:0%; background:#0969da; border-radius:3px; transition:width .25s; }
+  .status-txt { font-size:12px; color:#57606a; white-space:nowrap; }
+  .err-box { color:#cf222e; background:#f6f8fa; border:1px solid #d0d7de; border-radius:8px; padding:12px 16px; font-size:13px; margin-bottom:16px; }
+
+  /* ── Customer selector ── */
+  .selector-row { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:18px; }
+  .selector-row label { font-size:13px; font-weight:600; color:#24292f; }
+  select.cust-select {
+    padding:8px 12px; min-width:280px; font-size:13px;
+    border:1px solid #d0d7de; border-radius:7px; background:#fff; color:#24292f;
+  }
+
+  /* ── Customer header card ── */
+  .cust-card {
+    display:flex; gap:24px; align-items:flex-start; justify-content:space-between;
+    border:1px solid #d0d7de; border-radius:10px; padding:16px 18px;
+    background:#f6f8fa; margin-bottom:18px; flex-wrap:wrap;
+  }
+  .cust-left { flex:1 1 320px; min-width:260px; }
+  .cust-right {
+    flex:1 1 300px; min-width:240px; max-width:50%;
+    border-left:1px solid #d0d7de; padding-left:20px;
+  }
+  @media (max-width:640px){
+    .cust-right { border-left:none; border-top:1px solid #d0d7de; padding-left:0; padding-top:12px; max-width:100%; }
+  }
+  .cust-card h2 { font-size:18px; margin-bottom:6px; }
+  .cust-card .meta { font-size:12px; color:#57606a; margin-bottom:8px; }
+  .cust-card .addr { font-size:13px; color:#24292f; white-space:pre-wrap; line-height:1.4; }
+  .cust-right .lbl { font-size:11px; text-transform:uppercase; letter-spacing:.4px; color:#57606a; margin-bottom:6px; font-weight:700; }
+  .cust-right .inv-val { font-size:13px; color:#24292f; white-space:pre-wrap; line-height:1.45; }
+
+  /* ── PDF button ── */
+  .pdf-btn {
+    padding:8px 18px; border:1px solid #d0d7de; border-radius:7px; cursor:pointer;
+    font-size:13px; font-weight:700; background:#fff; color:#24292f; transition:background .15s;
+  }
+  .pdf-btn:hover { background:#f3f4f6; }
+  .ledger-toolbar { display:flex; justify-content:flex-end; margin-bottom:10px; }
+
+  /* ── Ledger table ── */
+  .table-wrap { overflow-x:auto; border:1px solid #d0d7de; border-radius:10px; }
+  table.ledger { width:100%; border-collapse:collapse; font-size:13px; }
+  table.ledger thead th {
+    background:#f6f8fa; text-align:left; padding:10px 12px; font-weight:700;
+    border-bottom:2px solid #d0d7de; white-space:nowrap; color:#24292f;
+  }
+  table.ledger tbody td { padding:9px 12px; border-bottom:1px solid #eaeef2; vertical-align:top; }
+  table.ledger tbody tr:hover { background:#f6f8fa; }
+  table.ledger td.num, table.ledger th.num { text-align:right; white-space:nowrap; font-variant-numeric:tabular-nums; }
+  table.ledger tfoot td {
+    padding:11px 12px; font-weight:700; border-top:2px solid #d0d7de; background:#f6f8fa;
+  }
+  .neg { color:#cf222e; }
+  .badge {
+    display:inline-block; font-size:10px; font-weight:700; padding:1px 6px; border-radius:5px;
+    background:#ddf4ff; color:#0969da; margin-right:6px; text-transform:uppercase; letter-spacing:.3px;
+  }
+  .badge.inv { background:#ddf4ff; color:#0969da; }
+  .badge.rec { background:#dafbe1; color:#1a7f37; }
+  .badge.cn  { background:#fff1e5; color:#bc4c00; }
+  .badge.je  { background:#f3e8ff; color:#8250df; }
+
+  .empty-state { padding:40px 20px; text-align:center; color:#57606a; font-size:14px; }
+  .summary-row { display:flex; gap:14px; flex-wrap:wrap; margin-bottom:14px; }
+  .stat { flex:1; min-width:150px; border:1px solid #d0d7de; border-radius:9px; padding:12px 14px; background:#fff; }
+  .stat .lbl { font-size:11px; text-transform:uppercase; letter-spacing:.4px; color:#57606a; }
+  .stat .val { font-size:20px; font-weight:700; margin-top:3px; font-variant-numeric:tabular-nums; }
+</style>
+</head>
+<body>
+
+<div class="ctrl-bar">
+  <button class="load-btn" id="load-btn" onclick="loadAllRecords()">⬇ Load All Records</button>
+  <div class="prog-wrap"><div class="prog-bar" id="prog-bar"></div></div>
+  <span class="status-txt" id="status-txt">Press Load to fetch data from Manager</span>
+</div>
+
+<div id="app"></div>
+
+<script>
+/* ══════════════════════════════════
+   postMessage helper — DO NOT MODIFY
+══════════════════════════════════ */
+function postMessageWithResponse(message) {
+  return new Promise((resolve, reject) => {
+    const requestId = crypto.randomUUID();
+    const timer = setTimeout(() => {
+      window.removeEventListener('message', handler);
+      reject(new Error('Timeout — is this running inside Manager.io?'));
+    }, 15000);
+    function handler(event) {
+      if (event.data?.type?.endsWith('-response') && event.data?.requestId === requestId) {
+        clearTimeout(timer);
+        window.removeEventListener('message', handler);
+        resolve(event.data.body);
+      }
+    }
+    window.addEventListener('message', handler);
+    window.parent.postMessage({ ...message, requestId }, '*');
+  });
+}
+
+/* ══════════════════════════════════
+   Generic paginated batch fetcher
+   Manager.io returns ≤50 records per call.
+   Follows next_page_token until done.
+   DO NOT SIMPLIFY to a single fetch.
+══════════════════════════════════ */
+async function fetchAllPages(endpoint, onProgress) {
+  const allItems = [];
+  let nextToken  = null;
+  let pageNum    = 0;
+  let apiTotal   = null;
+
+  do {
+    const path = nextToken
+      ? `/api4/${endpoint}?PageSize=99999&next_page_token=` + encodeURIComponent(nextToken)
+      : `/api4/${endpoint}?PageSize=99999`;
+
+    const data = await postMessageWithResponse({ type: 'api-request', method: 'GET', path });
+
+    const page = Array.isArray(data) ? data : (data.items || data.data || []);
+    allItems.push(...page);
+
+    nextToken = data.next_page_token || data.nextPageToken || data._links?.next?.href || null;
+
+    if (apiTotal === null) {
+      apiTotal = data.totalCount ?? data.total ?? data.count ?? data._metadata?.totalCount ?? null;
+    }
+
+    pageNum++;
+    if (onProgress) onProgress(allItems.length, apiTotal, pageNum);
+    if (pageNum >= 1000) break;
+  } while (nextToken);
+
+  return allItems;
+}
+
+/* customer-batch wrapper (kept for the Load button) */
+function getCustomerBatch(onProgress) {
+  return fetchAllPages('customer-batch', onProgress);
+}
+
+/* ══════════════════════════════════
+   Helpers
+══════════════════════════════════ */
+const fmt = v => {
+  const n = Number(v) || 0;
+  const s = Math.abs(n).toLocaleString(undefined, { minimumFractionDigits:2, maximumFractionDigits:2 });
+  return n < 0 ? '(' + s + ')' : s;
+};
+const fmtDate = d => {
+  if (!d) return '—';
+  const dt = new Date(d);
+  if (isNaN(dt)) return String(d);
+  return dt.toLocaleDateString(undefined, { year:'numeric', month:'short', day:'2-digit' });
+};
+// Pull the underlying record object regardless of batch wrapping shape
+const rec = b => b?.item || b || {};
+// The record's own key (some batches expose it at top level, some inside item)
+const recKey = b => b?.key || b?.item?.key || b?.id || null;
+
+/* Compute a single line's amount from raw inputs when no computed
+   total is present (Manager's batch list omits line.total).
+   Invoices carry value in salesUnitPrice; receipts/credit notes in amount. */
+function computeLineAmount(ln) {
+  if (typeof ln?.total === 'number' && ln.total !== 0) return ln.total;
+  if (typeof ln?.totalBeforeTax === 'number' && ln.totalBeforeTax !== 0) {
+    return ln.totalBeforeTax + (Number(ln?.taxAmount) || 0);
+  }
+  // First field that is a real non-zero number (avoids 0 placeholders)
+  const firstNonZero = (...vals) => {
+    for (const v of vals) { const n = Number(v); if (n) return n; }
+    return 0;
+  };
+  // qty defaults to 1 when omitted but a unit price/amount exists
+  const qty   = (ln?.qty == null) ? 1 : Number(ln.qty) || 0;
+  const price = firstNonZero(ln?.salesUnitPrice, ln?.currencyAmount, ln?.amount);
+  let base = qty * price;
+  // Apply discount (fixed amount takes precedence over percentage)
+  if (typeof ln?.discountAmount === 'number' && ln.discountAmount) {
+    base -= ln.discountAmount;
+  } else if (typeof ln?.discountPercentage === 'number' && ln.discountPercentage) {
+    base -= base * (ln.discountPercentage / 100);
+  }
+  // Add tax if a tax amount is supplied
+  base += Number(ln?.taxAmount) || 0;
+  return base;
+}
+
+/* Robust amount extraction: prefer a known computed total,
+   else compute & sum line amounts, else deep-scan total-like fields. */
+function extractAmount(r) {
+  // 1) Known explicit total fields (most reliable)
+  const candidates = [
+    r?.total, r?.totalInBaseCurrency, r?.totalAmountInBaseCurrency,
+    r?.amount, r?.balanceDue, r?.invoiceTotal, r?.grandTotal, r?.totalAmount,
+    r?.summaryAmount, r?.amountInBaseCurrency,
+    r?.fixedTotalAmount, r?.balancingAmount   // receipts entered as a fixed lump sum
+  ];
+  for (const c of candidates) {
+    if (typeof c === 'number' && !isNaN(c) && c !== 0) return c;
+  }
+
+  // 2) Compute from lines (the reliable path for batch-list records)
+  if (Array.isArray(r?.lines) && r.lines.length) {
+    let sum = 0;
+    for (const ln of r.lines) sum += computeLineAmount(ln);
+    if (sum !== 0) return sum;
+  }
+
+  // 3) Deep-scan: any top-level numeric key that looks like a money total,
+  //    excluding rates / flags / counts that would pollute the figure.
+  const skip = /rate|percentage|days|count|number|timestamp|exchange|qty|quantity|discountpercent/i;
+  const wanted = /total|amount|balance|grand|due/i;
+  for (const [k, v] of Object.entries(r || {})) {
+    if (typeof v !== 'number' || isNaN(v) || v === 0) continue;
+    if (skip.test(k)) continue;
+    if (wanted.test(k)) return v;
+  }
+  return 0;
+}
+
+/* Does this transaction reference the selected customer? */
+function matchesCustomer(r, custKey) {
+  if (!custKey) return false;
+  const direct = r?.customer;
+  if (direct && (direct === custKey || direct?.key === custKey || direct?.id === custKey)) return true;
+  // Some payloads store the customer string id directly
+  if (typeof direct === 'string' && direct === custKey) return true;
+  return false;
+}
+
+/* Sum line amounts on a transaction that are tied to the customer.
+   Receipts/payments attach the customer per line via accountsReceivableCustomer.
+   Returns the total of matching lines, or null if no line references any customer
+   (in which case the caller should fall back to header-level matching). */
+function customerLineAmount(r, custKey) {
+  if (!Array.isArray(r?.lines)) return null;
+  let sum = 0, sawLineCustomer = false, matched = false;
+  for (const ln of r.lines) {
+    const lineCust =
+      ln?.accountsReceivableCustomer || ln?.billableExpenseCustomer || ln?.customer;
+    const key = lineCust?.key || lineCust?.id || lineCust;
+    if (key) sawLineCustomer = true;
+    if (key && key === custKey) {
+      sum += computeLineAmount(ln);
+      matched = true;
+    }
+  }
+  if (!sawLineCustomer) return null;     // no per-line customer info → use header logic
+  return matched ? sum : 0;
+}
+
+/* For journal entries: scan lines for ones tied to the customer,
+   returning {debit, credit} totals attributable to that customer. */
+function journalCustomerSplit(r, custKey) {
+  let debit = 0, credit = 0;
+  if (!Array.isArray(r?.lines)) return { debit, credit };
+  for (const ln of r.lines) {
+    const lineCust =
+      ln?.customer || ln?.accountsReceivableCustomer || ln?.billableExpenseCustomer || ln?.subAccount;
+    const key = lineCust?.key || lineCust?.id || lineCust;
+    if (key && key === custKey) {
+      const d = Number(ln?.debit) || 0;
+      const c = Number(ln?.credit) || 0;
+      debit  += d;
+      credit += c;
+    }
+  }
+  return { debit, credit };
+}
+
+/* ══════════════════════════════════
+   State
+══════════════════════════════════ */
+let CUSTOMERS = [];   // raw customer-batch items
+let TXN = null;       // { invoices, receipts, creditNotes, journals }
+
+/* ══════════════════════════════════
+   loadAllRecords — wired to Load button
+══════════════════════════════════ */
+async function loadAllRecords() {
+  const btn    = document.getElementById('load-btn');
+  const bar    = document.getElementById('prog-bar');
+  const status = document.getElementById('status-txt');
+  const app    = document.getElementById('app');
+
+  btn.disabled = true;
+  btn.textContent = 'Loading…';
+  bar.style.width = '0%';
+  app.innerHTML = '';
+
+  try {
+    // 1) Customers
+    status.textContent = 'Loading customers…';
+    CUSTOMERS = await getCustomerBatch((loaded, total, page) => {
+      status.textContent = `Customers · page ${page} · ${loaded.toLocaleString()} loaded`;
+      bar.style.width = '20%';
+    });
+
+    // 2) Transactions (each is a paginated batch endpoint)
+    const steps = [
+      ['sales-invoice-batch', 'invoices',    35],
+      ['receipt-batch',       'receipts',    55],
+      ['credit-note-batch',   'creditNotes', 75],
+      ['journal-entry-batch', 'journals',    95],
+    ];
+    TXN = { invoices:[], receipts:[], creditNotes:[], journals:[] };
+
+    for (const [endpoint, key, pct] of steps) {
+      status.textContent = `Loading ${key}…`;
+      try {
+        TXN[key] = await fetchAllPages(endpoint, (loaded, total, page) => {
+          status.textContent = `${key} · page ${page} · ${loaded.toLocaleString()} loaded`;
+        });
+      } catch (e) {
+        // Non-fatal: an absent endpoint shouldn't break the whole ledger
+        TXN[key] = [];
+      }
+      bar.style.width = pct + '%';
+    }
+
+    bar.style.width = '100%';
+    status.textContent = `✓ ${CUSTOMERS.length.toLocaleString()} customers · `
+      + `${TXN.invoices.length} inv · ${TXN.receipts.length} rec · `
+      + `${TXN.creditNotes.length} cn · ${TXN.journals.length} je`;
+    btn.textContent = '↺ Reload';
+    btn.disabled = false;
+    render(CUSTOMERS);
+
+  } catch (err) {
+    status.textContent = '⚠ ' + err.message;
+    btn.textContent = '↺ Retry';
+    btn.disabled = false;
+    app.innerHTML = `<div class="err-box">⚠ ${err.message}<br><small>Make sure this is running inside Manager.io</small></div>`;
+  }
+}
+
+/* ══════════════════════════════════
+   render(items) — build customer selector
+══════════════════════════════════ */
+function render(items) {
+  const app = document.getElementById('app');
+
+  if (!items || items.length === 0) {
+    app.innerHTML = `<div class="empty-state">No customers found in this business.</div>`;
+    return;
+  }
+
+  // Sort customers by display name for the dropdown
+  const sorted = [...items].sort((a, b) => {
+    const an = (rec(a).nameWithCode || rec(a).name || '').toLowerCase();
+    const bn = (rec(b).nameWithCode || rec(b).name || '').toLowerCase();
+    return an.localeCompare(bn);
+  });
+
+  const options = sorted.map((c, i) => {
+    const r = rec(c);
+    const label = r.nameWithCode || r.text || r.name || ('Customer ' + (i + 1));
+    // store index into the sorted array
+    return `<option value="${i}">${escapeHtml(label)}</option>`;
+  }).join('');
+
+  app.innerHTML = `
+    <div class="selector-row">
+      <label for="cust-select">Customer:</label>
+      <select class="cust-select" id="cust-select" onchange="onSelectCustomer(this.value)">
+        <option value="">— Select a customer —</option>
+        ${options}
+      </select>
+    </div>
+    <div id="ledger-area">
+      <div class="empty-state">Select a customer to view their ledger.</div>
+    </div>
+  `;
+
+  // Keep the sorted list accessible to the change handler
+  window.__SORTED_CUSTOMERS = sorted;
+}
+
+function escapeHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, m =>
+    ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m]));
+}
+
+/* Inventory Details custom field key (from the custom-fields export) */
+const INVENTORY_DETAILS_KEY = '019ef7b2-7640-709c-9994-878a02913a78';
+
+/* Read a custom field value (any bucket) from a record or its lines */
+function getCustomField(obj, key) {
+  if (!obj) return '';
+  const b = obj.customFields2;
+  if (b) {
+    for (const bucket of ['strings', 'decimals', 'dates', 'booleans']) {
+      const val = b[bucket] && b[bucket][key];
+      if (val != null && val !== '') return String(val);
+    }
+  }
+  if (obj.customFields && obj.customFields[key] != null && obj.customFields[key] !== '') {
+    return String(obj.customFields[key]);
+  }
+  if (Array.isArray(obj.lines)) {
+    for (const ln of obj.lines) {
+      const v = getCustomField(ln, key);
+      if (v) return v;
+    }
+  }
+  return '';
+}
+
+/* Find Inventory Details for a customer: check the customer record first,
+   then fall back to scanning that customer's invoices/receipts. */
+function findInventoryDetails(c, custKey) {
+  let v = getCustomField(c, INVENTORY_DETAILS_KEY);
+  if (v) return v;
+  for (const b of (TXN?.invoices || [])) {
+    const r = rec(b);
+    if (!matchesCustomer(r, custKey)) continue;
+    v = getCustomField(r, INVENTORY_DETAILS_KEY);
+    if (v) return v;
+  }
+  for (const b of (TXN?.receipts || [])) {
+    const r = rec(b);
+    const belongs = customerLineAmount(r, custKey) || matchesCustomer(r, custKey);
+    if (!belongs) continue;
+    v = getCustomField(r, INVENTORY_DETAILS_KEY);
+    if (v) return v;
+  }
+  return '';
+}
+
+/* ══════════════════════════════════
+   onSelectCustomer — build the ledger
+══════════════════════════════════ */
+function onSelectCustomer(idx) {
+  const area = document.getElementById('ledger-area');
+  if (idx === '' || idx == null) {
+    area.innerHTML = `<div class="empty-state">Select a customer to view their ledger.</div>`;
+    return;
+  }
+
+  const customer = window.__SORTED_CUSTOMERS[Number(idx)];
+  const c = rec(customer);
+  const custKey = recKey(customer);
+
+  // ── Gather rows from each source ──
+  const rows = [];
+
+  // Sales invoices → Receivable column
+  for (const b of (TXN?.invoices || [])) {
+    const r = rec(b);
+    if (!matchesCustomer(r, custKey)) continue;
+    rows.push({
+      date: r.issueDate || r.date,
+      reference: r.reference,
+      description: r.description,
+      type: 'inv',
+      receivable: extractAmount(r),
+      received: 0,
+    });
+  }
+
+  // Receipts → Received column. Customer is attached per line
+  // (accountsReceivableCustomer); fall back to header customer.
+  for (const b of (TXN?.receipts || [])) {
+    const r = rec(b);
+    const lineAmt = customerLineAmount(r, custKey);
+    let amount;
+    if (lineAmt === null) {
+      if (!matchesCustomer(r, custKey)) continue;   // header-only matching
+      amount = extractAmount(r);
+    } else {
+      if (lineAmt === 0) continue;                   // receipt not for this customer
+      amount = lineAmt;
+    }
+    rows.push({
+      date: r.date || r.issueDate,
+      reference: r.reference,
+      description: r.description,
+      type: 'rec',
+      receivable: 0,
+      received: amount,
+    });
+  }
+
+  // Credit notes → Received column (reduces what's owed)
+  for (const b of (TXN?.creditNotes || [])) {
+    const r = rec(b);
+    const lineAmt = customerLineAmount(r, custKey);
+    let amount;
+    if (lineAmt === null) {
+      if (!matchesCustomer(r, custKey)) continue;
+      amount = extractAmount(r);
+    } else {
+      if (lineAmt === 0) continue;
+      amount = lineAmt;
+    }
+    rows.push({
+      date: r.issueDate || r.date,
+      reference: r.reference,
+      description: r.description,
+      type: 'cn',
+      receivable: 0,
+      received: amount,
+    });
+  }
+
+  // Journal entries → debit to customer = Receivable, credit = Received
+  for (const b of (TXN?.journals || [])) {
+    const r = rec(b);
+    const { debit, credit } = journalCustomerSplit(r, custKey);
+    if (debit === 0 && credit === 0) continue;
+    rows.push({
+      date: r.date || r.issueDate,
+      reference: r.reference,
+      description: r.description || r.narration,
+      type: 'je',
+      receivable: debit,
+      received: credit,
+    });
+  }
+
+  // ── Sort ascending by date ──
+  rows.sort((a, b) => {
+    const da = new Date(a.date).getTime() || 0;
+    const db = new Date(b.date).getTime() || 0;
+    return da - db;
+  });
+
+  // ── Running balance + totals ──
+  let running = 0, totRecv = 0, totRecd = 0;
+  for (const row of rows) {
+    running += (row.receivable || 0) - (row.received || 0);
+    row.balance = running;
+    totRecv += row.receivable || 0;
+    totRecd += row.received || 0;
+  }
+
+  // ── Customer header card (details left, inventory details right) ──
+  const addr = c.billingAddress || c.defaultBillingAddress || '—';
+  const inventoryDetails = findInventoryDetails(c, custKey);
+  const headerHtml = `
+    <div class="cust-card">
+      <div class="cust-left">
+        <h2>${escapeHtml(c.name || c.nameWithCode || 'Customer')}</h2>
+        <div class="meta">
+          ${c.code ? 'Code: ' + escapeHtml(c.code) : ''}
+          ${c.email ? ' · ' + escapeHtml(c.email) : ''}
+        </div>
+        <div class="addr">${escapeHtml(addr)}</div>
+      </div>
+      <div class="cust-right">
+        <div class="lbl">Inventory Details</div>
+        <div class="inv-val">${escapeHtml(inventoryDetails || '—')}</div>
+      </div>
+    </div>
+    <div class="summary-row">
+      <div class="stat"><div class="lbl">Total Receivable</div><div class="val">${fmt(totRecv)}</div></div>
+      <div class="stat"><div class="lbl">Total Received</div><div class="val">${fmt(totRecd)}</div></div>
+      <div class="stat"><div class="lbl">Closing Balance</div>
+        <div class="val ${running < 0 ? 'neg' : ''}">${fmt(running)}</div></div>
+    </div>
+  `;
+
+  // Stash everything the PDF generator needs
+  window.__LEDGER = {
+    name: c.name || c.nameWithCode || 'Customer',
+    code: c.code || '',
+    email: c.email || '',
+    address: addr === '—' ? '' : addr,
+    inventory: inventoryDetails || '',
+    rows, totRecv, totRecd, closing: running,
+  };
+
+  // ── Empty ledger ──
+  if (rows.length === 0) {
+    area.innerHTML = headerHtml +
+      `<div class="empty-state">No transactions found for this customer.</div>`;
+    return;
+  }
+
+  // ── Build table rows ──
+  const badgeLabel = { inv:'Invoice', rec:'Receipt', cn:'Credit Note', je:'Journal' };
+  const bodyHtml = rows.map(row => `
+    <tr>
+      <td>${fmtDate(row.date)}</td>
+      <td><span class="badge ${row.type}">${badgeLabel[row.type]}</span>${escapeHtml(row.reference ?? '—')}</td>
+      <td>${escapeHtml(row.description || '—')}</td>
+      <td class="num">${row.receivable ? fmt(row.receivable) : ''}</td>
+      <td class="num">${row.received ? fmt(row.received) : ''}</td>
+      <td class="num ${row.balance < 0 ? 'neg' : ''}">${fmt(row.balance)}</td>
+    </tr>
+  `).join('');
+
+  area.innerHTML = headerHtml + `
+    <div class="ledger-toolbar">
+      <button class="pdf-btn" onclick="downloadPdf()">⬇ Download PDF (Landscape)</button>
+    </div>
+    <div class="table-wrap">
+      <table class="ledger">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Reference</th>
+            <th>Description</th>
+            <th class="num">Receivable</th>
+            <th class="num">Received</th>
+            <th class="num">Balance</th>
+          </tr>
+        </thead>
+        <tbody>${bodyHtml}</tbody>
+        <tfoot>
+          <tr>
+            <td colspan="3">Totals</td>
+            <td class="num">${fmt(totRecv)}</td>
+            <td class="num">${fmt(totRecd)}</td>
+            <td class="num ${running < 0 ? 'neg' : ''}">${fmt(running)}</td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+  `;
+}
+
+/* ══════════════════════════════════
+   downloadPdf — landscape A4 ledger via jsPDF + autoTable
+══════════════════════════════════ */
+function downloadPdf() {
+  const L = window.__LEDGER;
+  if (!L) { alert('Select a customer first.'); return; }
+  if (!window.jspdf || !window.jspdf.jsPDF) {
+    alert('PDF library failed to load (check internet connection).');
+    return;
+  }
+
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
+  const pageW = doc.internal.pageSize.getWidth();
+  const M = 40; // margin
+
+  // ── Title ──
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(16);
+  doc.text('Customer Ledger', M, 40);
+
+  // ── Customer details (left block) ──
+  doc.setFontSize(11);
+  doc.text(L.name, M, 62);
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
+  let ly = 78;
+  const metaBits = [L.code ? 'Code: ' + L.code : '', L.email].filter(Boolean).join('   ');
+  if (metaBits) { doc.text(metaBits, M, ly); ly += 13; }
+  if (L.address) {
+    const addrLines = doc.splitTextToSize(L.address, pageW * 0.45);
+    doc.text(addrLines, M, ly);
+    ly += addrLines.length * 12;
+  }
+
+  // ── Inventory Details (right block) ──
+  const rightX = pageW - M;
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(9);
+  doc.text('Inventory Details', rightX, 62, { align: 'right' });
+  doc.setFont('helvetica', 'normal');
+  const invLines = doc.splitTextToSize(L.inventory || '—', pageW * 0.40);
+  doc.text(invLines, rightX, 76, { align: 'right' });
+  const rightBottom = 76 + invLines.length * 12;
+
+  // ── Table ──
+  const badgeLabel = { inv: 'Invoice', rec: 'Receipt', cn: 'Credit Note', je: 'Journal' };
+  const body = L.rows.map(r => ([
+    fmtDate(r.date),
+    (badgeLabel[r.type] || '') + (r.reference ? '  ' + r.reference : ''),
+    r.description || '—',
+    r.receivable ? fmt(r.receivable) : '',
+    r.received ? fmt(r.received) : '',
+    fmt(r.balance),
+  ]));
+
+  doc.autoTable({
+    startY: Math.max(ly, rightBottom) + 12,
+    head: [['Date', 'Reference', 'Description', 'Receivable', 'Received', 'Balance']],
+    body,
+    foot: [['Totals', '', '', fmt(L.totRecv), fmt(L.totRecd), fmt(L.closing)]],
+    theme: 'grid',
+    styles: { fontSize: 8, cellPadding: 4, lineColor: [208, 215, 222], lineWidth: 0.5, textColor: [36, 41, 47] },
+    headStyles: { fillColor: [246, 248, 250], textColor: [36, 41, 47], fontStyle: 'bold' },
+    footStyles: { fillColor: [246, 248, 250], textColor: [36, 41, 47], fontStyle: 'bold' },
+    columnStyles: {
+      0: { cellWidth: 70 },
+      1: { cellWidth: 130 },
+      3: { halign: 'right' },
+      4: { halign: 'right' },
+      5: { halign: 'right' },
+    },
+    margin: { left: M, right: M },
+  });
+
+  const safe = (L.name || 'customer').replace(/[^\w\-]+/g, '_');
+  doc.save('Customer-Ledger-' + safe + '.pdf');
+}
+</script>
+</body>
+</html>
